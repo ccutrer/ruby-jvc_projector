@@ -1,0 +1,24 @@
+#!/usr/bin/env ruby
+
+require 'jvc/projector'
+require 'thor'
+
+class JVCProjectorCLI < Thor
+  desc "mqtt PORT MQTT_URI", "Run an MQTT bridge to control the JVC Projector at host"
+  option :"device-id", default: "jvc-projector", desc: "The Homie Device ID"
+  option :"root-topic", default: "homie", desc: "The root Homie topic"
+  def mqtt(host, mqtt_uri)
+    require 'jvc/projector/cli/mqtt'
+
+    projector = JVC::Projector.new(host)
+    homie = MQTT::Homie::Device.new(
+      options["device-id"],
+      "JVC Projector",
+      mqtt: mqtt_uri,
+      root_topic: options["base-topic"])
+
+    JVC::Projector::CLI::MQTT.new(projector, homie)
+  end
+end
+
+JVCProjectorCLI.start(ARGV)
