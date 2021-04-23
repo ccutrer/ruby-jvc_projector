@@ -126,7 +126,11 @@ module JVC
             end
 
             pj.property("installation-mode", "Installation Mode (Lens Memory)", :integer, retained: false, format: 1..10) do |value|
-              synchronize { projector.installation_mode = value }
+              begin
+                synchronize { projector.installation_mode = value }
+              rescue => e
+                puts "failed setting things #{e}"
+              end
             end
 
             pj.property("installation-style", "Installation Style", :enum, projector.installation_style, format: INSTALLATION_STYLE.keys) do |value|
@@ -231,8 +235,12 @@ module JVC
           end
 
           loop do
-            synchronize do
-              projector.update
+            begin
+              synchronize do
+                projector.update
+              end
+            rescue => e
+              puts "failed updating: #{e}"
             end
             sleep 1
           end

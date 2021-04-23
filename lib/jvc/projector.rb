@@ -27,6 +27,7 @@ module JVC
     def close
       @io&.close
       @io = nil
+      @buffer = ""
     end
 
     def rc_code=(code)
@@ -56,7 +57,8 @@ module JVC
     def installation_mode=(mode)
       raise ArgumentError("invalid mode index") unless (1..10).include?(mode)
       mode -= 1
-      command("IN", "LM#{mode}")
+      # this can take a _really_ long time
+      command("IN", "ML#{mode}", timeout: 30)
     end
 
     # have to overwrite because 2 is on
@@ -177,9 +179,9 @@ module JVC
       message("?", command, subcommands, timeout: 1)
     end
 
-    def command(cmd, args = nil)
+    def command(cmd, args = nil, timeout: nil)
       @pending_response = nil
-      message("!", cmd, args, timeout: 10)
+      message("!", cmd, args, timeout: timeout || 10)
     end
 
     def message(type, command, args = nil, timeout: nil)
@@ -190,10 +192,10 @@ module JVC
     end
 
     def wait_for_response(timeout)
-      return if @io.wait_readable(timeout) == nil
-      read
+      read(timeout)
       while @io.ready? || @pending_response
-        read
+        timeout ||= 1
+        read(timeout)
       end
     end
 
@@ -232,6 +234,7 @@ module JVC
       "ISLV" => :parallax_3d,
 
       "INKV" => :keystone,
+      "INML" => :installation_mode,
 
       # this is coming back as a single byte?
       "FUOT" => :off_timer,
@@ -352,11 +355,18 @@ module JVC
     }.freeze
     private_constant :MODELS
 
-    def read
-      line = @io.readline
-      raise "message too short" unless line.length >= 6
-      raise "no newline" unless line[-1] == "\n"
-      raise "unrecognized id" unless line[1..2] == "\x89\x01".force_encoding(line.encoding)
+    def read(timeout = nil)
+      if @io.wait_readable(timeout).nil?
+        puts "timed out waiting for read"
+        @pending_response = nil
+        return
+      end
+      @buffer.concat(@io.readline)
+      return unless @buffer[-1] == "\n"
+      line, @buffer = @buffer, ""
+        
+      raise "message too short: #{line.inspect}" unless line.length >= 6
+      raise "unrecognized id #{line[1..2].inspect}" unless line[1..2] == "\x89\x01".force_encoding(line.encoding)
 
       cmd = line[3..4]
       args = line[5..-2]
@@ -365,12 +375,12 @@ module JVC
       when "\x06"
         raise "line too long" unless line.length == 6
         puts "ack: #{cmd.inspect}"
-        if cmd == "PM" && @pending_response =~ /^U(\X)$/
-          @picture_mode_names[$1.to_i(16) - 1] = @io.read(10).strip
+        if cmd == "PM" && @pending_response != true && @pending_response =~ /^U(\X)$/
+          @picture_mode_names[$1.to_i(16) - 1] = readbytes(10).strip
           @pending_response = nil
         end
-        if cmd == "IN" && @pending_response =~ /^M(\X)$/
-          @installation_mode_names[$1.to_i(16) - 1] = @io.read(10).strip
+        if cmd == "IN" && @pending_response != true && @pending_response =~ /^M(\X)$/
+          @installation_mode_names[$1.to_i(16) - 1] = readbytes(10).strip
           @pending_response = nil
         end
       when "@"
@@ -453,6 +463,15 @@ module JVC
       else
         raise "unrecognized message type #{line[0].inspect}"
       end
+    end
+
+    def readbytes(length)
+      result = +''
+      while result.length < length
+        @io.wait_readable
+        result += @io.read(length - result.length)
+      end
+      result
     end
 
     def assign(iv, value)
