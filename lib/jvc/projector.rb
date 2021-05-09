@@ -69,7 +69,9 @@ module JVC
     end
 
     def resolution
-      "#{horizontal_resolution}x#{vertical_resolution}" if horizontal_resolution && vertical_resolution
+      return "#{horizontal_resolution}x#{vertical_resolution}" if horizontal_resolution && vertical_resolution
+
+      "no_signal"
     end
 
     def on_update(&block)
@@ -78,7 +80,11 @@ module JVC
 
     def update
       request("PW")
-      return unless power == :on
+      unless power == :on
+        assign(:source, :no_signal)
+        clear_image_format_ivs
+        return
+      end
       
       unless version
         request("IF", "SV") 
@@ -107,14 +113,7 @@ module JVC
       if source && source != :no_signal
         request("IF", %w{RH RV FH FV DC XB CM HR})
       else
-        @horizontal_resolution =
-          @vertical_resolution =
-          @horizontal_frequency =
-          @vertical_frequency =
-          @color_depth =
-          @color_model = 
-          @color_space =
-          @hdr = nil
+        clear_image_format_ivs
       end
       request("IF", %w{LT MC MF})
     end
@@ -167,6 +166,19 @@ module JVC
     def update_function
       # OT
       request("FU", %w{TR EM CF})
+    end
+
+    def clear_image_format_ivs
+      %i[horizontal_resolution
+        vertical_resolution
+        horizontal_frequency
+        vertical_frequency
+        color_depth
+        color_model
+        color_space
+        hdr].each do |iv|
+        assign(iv, nil)
+      end
     end
 
     def request(command, subcommands = nil)
@@ -475,6 +487,9 @@ module JVC
     end
 
     def assign(iv, value)
+      old_value = instance_variable_get(:"@#{iv}")
+      return if value == old_value
+
       instance_variable_set(:"@#{iv}", value)
       @notifier&.call(iv, value)
     end
